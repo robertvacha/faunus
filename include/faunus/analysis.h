@@ -9,6 +9,7 @@
 #include <faunus/space.h>
 #include <faunus/point.h>
 #include <faunus/textio.h>
+#include <Eigen/Core>
 #endif
 
 #include <chrono>
@@ -56,7 +57,67 @@ namespace Faunus {
     };
 
     /**
-     * @brief General class for handling 2D tables - xy date, for example.
+     * @brief Pressure analysis using the virial theorem
+     *
+     * At the moment this is limited to "soft" systems only,
+     * i.e. for non-rigid systems with continuous potentials.
+     *
+     * References:
+     *
+     * - <http://dx.doi.org/10/fspzcx>
+     * - <http://dx.doi.org/10/ffwrhd>
+     *
+     */
+    class VirialPressure : public AnalysisBase {
+      private:
+
+        double Pid;        // ideal pressure
+        Average<double> P; // excess pressure scalar
+        Eigen::Matrix3d T; // excess pressure tensor
+
+        inline string _info() {
+          using namespace Faunus::textio;
+          std::ostringstream o;
+          if (cnt>0) {
+            double p=P.avg(), kT=pc::kB*pc::T();
+            o << pad(SUB,w, "Excess pressure") << p << " kT/"+angstrom+cubed+" = "
+              << p*1e30/pc::Nav << " mM = "
+              << p*kT*1e30 << " Pa = "
+              << p*kT*1e30/0.980665e5 << " atm\n"
+              << pad(SUB,w, "Tensor trace") << (T/cnt).trace() << " kT/"+angstrom+cubed+"\n"
+              << "  Excess pressure tensor:\n\n" << T/cnt << "\n"
+              << endl;
+          }
+          return o.str();
+        }
+
+      public:
+
+        VirialPressure() {
+          name="Virial Pressure";
+          T.setZero();
+        }
+
+        template<class Tvec, class Tgeo, class Tpot>
+          void sample(Tgeo &geo, Tpot &pot, const Tvec &v, double d=3) {
+            cnt++;
+            double p=0, V=geo.getVolume();
+            Eigen::Matrix3d t;
+            t.setZero();
+            for (size_t i=0; i<v.size()-1; i++)
+              for (size_t j=i+1; j<v.size(); j++) {
+                auto rij = geo.vdist(v[i],v[j]);
+                auto fij = pot.f_p2p(v[i],v[j]);
+                t += rij * fij.transpose(); // sample P tensor
+                p += rij.dot(fij);          // sample pressure scalar (check!)
+              }
+            T += t/(d*V);
+            P += p/(d*V);
+          }
+    };
+
+    /**
+     * @brief General class for handling 2D tables - xy data, for example.
      * @date Lund 2011
      * @note `Tx` is used as the `std::map` key and which may be
      * problematic due to direct floating point comparison (== operator).
@@ -132,13 +193,13 @@ namespace Faunus {
               if (map.size()>1) (--map.end())->second/=2; // -//-
             }
           }
-          
+
           Tmap getMap() {
             return map;
           }
-          
+
           Tx getResolution() {
-              return dx;
+            return dx;
           }
 
           /*! Returns x at minumum y */
@@ -398,17 +459,17 @@ namespace Faunus {
               for (auto i : g){
                 if (spc.p[i].id==ida || spc.p[i].id==idb){
                   bulk++;
-		}
-	      }
+                }
+              }
               Npart+=bulk;
               bulkconc += bulk / spc.geo.getVolume();
             }
-    
+
 
           template<class Tspace>
             void sample(Tspace &spc, short ida, short idb) {
               Group all(0, spc.p.size()-1);
-              assert(all.size()==spc.p.size());
+              assert(all.size()==(int)spc.p.size());
               return sample(spc,all,ida,idb);
             }
       };
@@ -1072,21 +1133,21 @@ namespace Faunus {
             }
             val /= p.size();
             cout << "K: " << 1+val << ", " << M_inf.avg()/(p[0].muscalar*p[0].muscalar) << endl;
-            
+
             return M_inf.avg()/(p[0].muscalar*p[0].muscalar);
           }
 
-        
-           template<class Tspace>
-           void kusalik(const Tspace &spc) {
-            double lambda = 1;
-            double alpha = 1;
+
+        template<class Tspace>
+          void kusalik(const Tspace &spc) {
+            //double lambda = 1;
+            //double alpha = 1;
             //mucorr(r) += spc.p[i].mu.dot(spc.p[j].mu);
-            double A = alpha*3*pc::Ang2Bohr(spc.geo.getVolume(),3)*pc::kT2Hartree()/(8*pc::pi);
-            double eps = (lambda*lambda-2*lambda-A)/(lambda*lambda-2*lambda-A-1);
+            //double A = alpha*3*pc::Ang2Bohr(spc.geo.getVolume(),3)*pc::kT2Hartree()/(8*pc::pi);
+            //double eps = (lambda*lambda-2*lambda-A)/(lambda*lambda-2*lambda-A-1);
             P.save("AAA.dat"); 
             P1.save("BBB.dat");
-           }
+          }
 
         /**
          * @brief Returns dielectric constant according to \f$ \frac{\epsilon_0-1}{3} = \frac{4\pi}{9Vk_BT}<\bold{M}^2> + \frac{\epsilon_x-1}{3}  \f$. Only works when \f$ \epsilon_{RF} = \infty \f$.
